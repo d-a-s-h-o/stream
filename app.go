@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/cheggaaa/pb/v3"
 )
 
 type model struct {
@@ -41,10 +45,14 @@ const (
 )
 
 func main() {
-	p := tea.NewProgram(initialModel())
-	if err := p.Start(); err != nil {
-		fmt.Printf("Alas, there's been an error: %v", err)
-		return
+	if len(os.Args) > 1 && os.Args[1] == "test" {
+		runTest()
+	} else {
+		p := tea.NewProgram(initialModel())
+		if err := p.Start(); err != nil {
+			fmt.Printf("Alas, there's been an error: %v", err)
+			return
+		}
 	}
 }
 
@@ -152,7 +160,7 @@ func (m model) View() string {
 
 func loadContent() tea.Cmd {
 	return func() tea.Msg {
-		resp, err := http.Get("https://dasho.dev/content.json")
+		resp, err := http.Get("https://raw.githubusercontent.com/d-a-s-h-o/stream/master/content.json")
 		if err != nil {
 			return msgContentReceived{nil, err}
 		}
@@ -194,4 +202,76 @@ func filterChoices(choices []ContentItem, filter string) []ContentItem {
 	}
 
 	return filtered
+}
+
+func runTest() {
+	content, err := getContent()
+	if err != nil {
+		fmt.Printf("Error getting content: %v\n", err)
+		return
+	}
+
+	bar := pb.StartNew(len(content))
+	bar.SetRefreshRate(time.Millisecond * 100)
+
+	deadItems := make([]string, 0)
+
+	for _, item := range content {
+		resp, err := http.Head(item.Url)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			deadItems = append(deadItems, item.Name)
+		}
+
+		bar.Increment()
+		time.Sleep(time.Millisecond * 10) // Simulate processing time
+
+		resp.Body.Close()
+	}
+
+	bar.Finish()
+
+	if len(deadItems) > 0 {
+		fmt.Println("Dead items:")
+		for _, item := range deadItems {
+			fmt.Println(item)
+		}
+	} else {
+		fmt.Println("No dead items found.")
+	}
+}
+
+func getContent() ([]ContentItem, error) {
+	resp, err := http.Get("https://raw.githubusercontent.com/d-a-s-h-o/stream/master/content.json")
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var content []ContentItem
+	err = json.NewDecoder(resp.Body).Decode(&content)
+	if err != nil {
+		return nil, err
+	}
+
+	return content, nil
+}
+
+func testLinks(content []ContentItem) []ContentItem {
+	var wg sync.WaitGroup
+	deadItems := make([]ContentItem, 0)
+
+	for _, item := range content {
+		wg.Add(1)
+		go func(item ContentItem) {
+			defer wg.Done()
+
+			resp, err := http.Get(item.Url)
+			if err != nil || resp.StatusCode != http.StatusOK {
+				deadItems = append(deadItems, item)
+			}
+		}(item)
+	}
+
+	wg.Wait()
+	return deadItems
 }
