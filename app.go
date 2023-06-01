@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -93,21 +94,29 @@ func (m model) View() string {
 	b := strings.Builder{}
 	b.WriteString(m.textInput.View() + "\n\n")
 
+	// Calculate column widths
+	nameWidth := 20 + 10*strings.Count(m.textInput.Value(), " ")
+	yearWidth := 10
+	typeWidth := 10
+
 	// Format the movie list
 	for _, item := range m.filtered {
-		url := item.Url
-		if len(url) > 20 {
-			url = url[:10] + "..." + url[len(url)-10:]
+		// Truncate name if too long
+		name := item.Name
+		if len(name) > nameWidth {
+			name = name[:nameWidth-3] + "..."
+		} else {
+			name += strings.Repeat(" ", nameWidth-len(name))
 		}
 
 		// Apply styling using lipgloss
-		name := lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render(item.Name)
-		year := lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render(fmt.Sprintf("%d", item.Year))
-		contentType := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render(item.Type)
-		urlShortened := lipgloss.NewStyle().Foreground(lipgloss.Color("100")).Render(url)
+		name = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Render(name)
+		year := lipgloss.NewStyle().Foreground(lipgloss.Color("242")).Render(fmt.Sprintf("%-*d", yearWidth, item.Year))
+		contentType := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Render(fmt.Sprintf("%-*s", typeWidth, item.Type))
+		url := lipgloss.NewStyle().Foreground(lipgloss.Color("100")).Render(item.Url)
 
 		// Append the formatted line to the output
-		b.WriteString(fmt.Sprintf("%s | %s | %s | URL: %s\n", name, year, contentType, urlShortened))
+		b.WriteString(fmt.Sprintf("%s | %s | %s | URL: %s\n", name, year, contentType, url))
 	}
 
 	return b.String()
@@ -134,15 +143,28 @@ func getContent() tea.Msg {
 	return msgContentReceived{content, nil}
 }
 
+func sortChoicesAlphabetically(choices []ContentItem) []ContentItem {
+	sorted := make([]ContentItem, len(choices))
+	copy(sorted, choices)
+
+	sort.Slice(sorted, func(i, j int) bool {
+		return strings.ToLower(sorted[i].Name) < strings.ToLower(sorted[j].Name)
+	})
+
+	return sorted
+}
+
 // Filter the choices based on the filter string
 func filterChoices(choices []ContentItem, filter string) []ContentItem {
+	filter = strings.ReplaceAll(filter, " ", "")
 	if filter == "" {
 		return choices
 	}
 
-	var filtered []ContentItem
+	filtered := make([]ContentItem, 0)
 	for _, choice := range choices {
-		if strings.Contains(strings.ToLower(choice.Name), strings.ToLower(filter)) {
+		name := strings.ReplaceAll(choice.Name, " ", "")
+		if strings.Contains(strings.ToLower(name), strings.ToLower(filter)) {
 			filtered = append(filtered, choice)
 		}
 	}
