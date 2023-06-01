@@ -18,6 +18,7 @@ type model struct {
 	filtered  []ContentItem
 	textInput textinput.Model
 	err       error
+	charCount int
 }
 
 type msgContentReceived struct {
@@ -52,6 +53,7 @@ func initialModel() model {
 		filtered:  []ContentItem{},
 		textInput: ti,
 		err:       nil,
+		charCount: 0,
 	}
 
 	return m
@@ -71,6 +73,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.textInput, _ = m.textInput.Update(msg)
 		m.filtered = filterChoices(m.choices, m.textInput.Value())
+		m.charCount = len(m.textInput.Value())
 		return m, nil
 
 	case msgContentReceived:
@@ -81,6 +84,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		m.choices = msg.content
 		m.filtered = filterChoices(m.choices, m.textInput.Value())
+		return m, nil
 	}
 
 	return m, nil
@@ -95,7 +99,7 @@ func (m model) View() string {
 	b.WriteString(m.textInput.View() + "\n\n")
 
 	// Calculate column widths
-	nameWidth := 20 + 10*strings.Count(m.textInput.Value(), " ")
+	nameWidth := 20 + (m.charCount/5)*5
 	yearWidth := 10
 	typeWidth := 10
 
@@ -140,21 +144,16 @@ func getContent() tea.Msg {
 		return msgContentReceived{nil, err}
 	}
 
+	// Sort the content alphabetically
+	sort.Slice(content, func(i, j int) bool {
+		return strings.ToLower(content[i].Name) < strings.ToLower(content[j].Name)
+	})
+
 	return msgContentReceived{content, nil}
 }
 
-func sortChoicesAlphabetically(choices []ContentItem) []ContentItem {
-	sorted := make([]ContentItem, len(choices))
-	copy(sorted, choices)
-
-	sort.Slice(sorted, func(i, j int) bool {
-		return strings.ToLower(sorted[i].Name) < strings.ToLower(sorted[j].Name)
-	})
-
-	return sorted
-}
-
 // Filter the choices based on the filter string
+// Filter the choices based on the filter string and sort them alphabetically
 func filterChoices(choices []ContentItem, filter string) []ContentItem {
 	filter = strings.ReplaceAll(filter, " ", "")
 	if filter == "" {
@@ -168,6 +167,11 @@ func filterChoices(choices []ContentItem, filter string) []ContentItem {
 			filtered = append(filtered, choice)
 		}
 	}
+
+	// Sort the filtered choices alphabetically
+	sort.Slice(filtered, func(i, j int) bool {
+		return strings.ToLower(filtered[i].Name) < strings.ToLower(filtered[j].Name)
+	})
 
 	return filtered
 }
