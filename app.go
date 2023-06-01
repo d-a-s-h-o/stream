@@ -14,11 +14,13 @@ import (
 )
 
 type model struct {
-	choices   []ContentItem
-	filtered  []ContentItem
-	textInput textinput.Model
-	err       error
-	charCount int
+	choices      []ContentItem
+	filtered     []ContentItem
+	textInput    textinput.Model
+	err          error
+	charCount    int
+	loading      bool
+	loadComplete bool
 }
 
 type msgContentReceived struct {
@@ -32,6 +34,11 @@ type ContentItem struct {
 	Type string `json:"type"`
 	Url  string `json:"url"`
 }
+
+const (
+	InitialVisibleItems = 10
+	LoadMoreIncrement   = 10
+)
 
 func main() {
 	p := tea.NewProgram(initialModel())
@@ -49,18 +56,20 @@ func initialModel() model {
 	ti.Width = 20
 
 	m := model{
-		choices:   []ContentItem{},
-		filtered:  []ContentItem{},
-		textInput: ti,
-		err:       nil,
-		charCount: 0,
+		choices:      []ContentItem{},
+		filtered:     []ContentItem{},
+		textInput:    ti,
+		err:          nil,
+		charCount:    0,
+		loading:      true,
+		loadComplete: false,
 	}
 
 	return m
 }
 
 func (m model) Init() tea.Cmd {
-	return getContent
+	return loadContent()
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -83,6 +92,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		m.choices = msg.content
+		m.loading = false
+		m.loadComplete = true
 		m.filtered = filterChoices(m.choices, m.textInput.Value())
 		return m, nil
 	}
@@ -104,7 +115,12 @@ func (m model) View() string {
 	typeWidth := 10
 
 	// Format the movie list
-	for _, item := range m.filtered {
+	visibleItems := InitialVisibleItems
+	if visibleItems > len(m.filtered) {
+		visibleItems = len(m.filtered)
+	}
+
+	for _, item := range m.filtered[:visibleItems] {
 		// Truncate name if too long
 		name := item.Name
 		if len(name) > nameWidth {
@@ -123,37 +139,46 @@ func (m model) View() string {
 		b.WriteString(fmt.Sprintf("%s | %s | %s | URL: %s\n", name, year, contentType, url))
 	}
 
+	if !m.loadComplete && m.loading {
+		// Show loading message
+		b.WriteString("\n[Loading...]")
+	} else if !m.loadComplete && !m.loading {
+		// Show load more message
+		b.WriteString("\n[Load more...]")
+	}
+
 	return b.String()
 }
 
-func getContent() tea.Msg {
-	resp, err := http.Get("https://dasho.dev/content.json")
-	if err != nil {
-		return msgContentReceived{nil, err}
+func loadContent() tea.Cmd {
+	return func() tea.Msg {
+		resp, err := http.Get("https://dasho.dev/content.json")
+		if err != nil {
+			return msgContentReceived{nil, err}
+		}
+
+		defer resp.Body.Close()
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			return msgContentReceived{nil, err}
+		}
+
+		var content []ContentItem
+		err = json.Unmarshal(body, &content)
+		if err != nil {
+			return msgContentReceived{nil, err}
+		}
+
+		// Sort the content alphabetically
+		sort.Slice(content, func(i, j int) bool {
+			return strings.ToLower(content[i].Name) < strings.ToLower(content[j].Name)
+		})
+
+		return msgContentReceived{content, nil}
 	}
-
-	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return msgContentReceived{nil, err}
-	}
-
-	var content []ContentItem
-	err = json.Unmarshal(body, &content)
-	if err != nil {
-		return msgContentReceived{nil, err}
-	}
-
-	// Sort the content alphabetically
-	sort.Slice(content, func(i, j int) bool {
-		return strings.ToLower(content[i].Name) < strings.ToLower(content[j].Name)
-	})
-
-	return msgContentReceived{content, nil}
 }
 
 // Filter the choices based on the filter string
-// Filter the choices based on the filter string and sort them alphabetically
 func filterChoices(choices []ContentItem, filter string) []ContentItem {
 	filter = strings.ReplaceAll(filter, " ", "")
 	if filter == "" {
@@ -167,11 +192,6 @@ func filterChoices(choices []ContentItem, filter string) []ContentItem {
 			filtered = append(filtered, choice)
 		}
 	}
-
-	// Sort the filtered choices alphabetically
-	sort.Slice(filtered, func(i, j int) bool {
-		return strings.ToLower(filtered[i].Name) < strings.ToLower(filtered[j].Name)
-	})
 
 	return filtered
 }
